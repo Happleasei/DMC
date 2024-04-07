@@ -65,6 +65,7 @@ class DMCModel:
         """
         result_matrix = np.zeros(self.predict_step)
         # 遍历每个特征
+        record_s_matrix = []
         for pc in range(self.params_count):
             # 取当前特征影响步
             cl = self.time_lists[pc]
@@ -74,25 +75,28 @@ class DMCModel:
             u_matrix_i = u_matrix[-int(cl):, pc]
             # 点积运算，并差分
             a_u_dot = np.diff(np.dot(u_matrix_i[:, np.newaxis], a_matrix_i[np.newaxis, :]))[1:, :]
-            a_u_shape = a_u_dot.shape[0]
+            # a_u_shape = a_u_dot.shape[0]
             # 从a_u_dot右上角-左下角对角线开始对每个对角线求和，遍历会线性叠加所有特征的影响
-            for ps in range(a_u_shape):
-                result_matrix[ps] += np.trace(a_u_dot[ps:, ps:])
+            record_list = []
+            for i in range(len(result_matrix)):
+                result_matrix[i] += np.trace(a_u_dot[i:, i:][:, ::-1])
+                record_list.append(np.trace(a_u_dot[i:, i:][:, ::-1]))
+            record_s_matrix.append(record_list)
         # 通过当前的料层差压值叠加未来100步的影响，得到未来100步的预测值
         y_p = [dp_last + result_matrix[0]]
         # 料层每步的预测值要累加前面所有的影响
         for rm_ in range(len(result_matrix) - 1):
             y_p.append(y_p[rm_] + result_matrix[rm_ + 1])
-        return y_p
+        return y_p, record_s_matrix
 
     def dt_matrix(self):
         """
         计算dt_matrix 用于滚动优化输出增量
         """
         # 构建Q矩阵，误差权重矩阵
-        q_matrix = np.diag([0.95 for _ in range(self.predict_step)])
+        q_matrix = np.diag([0.98 for _ in range(self.predict_step)])
         # 构建R矩阵，控制权重矩阵
-        r_matrix = np.diag([0.05 for _ in range(self.control_step)])
+        r_matrix = np.diag([0.02 for _ in range(self.control_step)])
         # 初始化A矩阵
         a_matrix = np.zeros((self.predict_step, self.control_step))
         # 遍历控制步 构建A矩阵
@@ -122,14 +126,14 @@ class DMCModel:
         :return: 增量、预测值
         """
         # 预测
-        target_value_flow = self.target_value_flow(dp_last, target_value, 0.5)
-        predict_value = self.predict_values(input_data[-self.predict_step:], dp_last)
+        target_value_flow = self.target_value_flow(dp_last, target_value, 0)
+        predict_value, record_s_matrix = self.predict_values(input_data[-self.input_max_step:], dp_last)
         # 反馈矫正
-        # error = dp_last - predict_value[0]
-        # predict_value += error
+        error = dp_last - predict_value[0]
+        predict_value += 1 * error
         # 滚动优化
         increments = np.dot(self.dt_matrix_, (np.array(target_value_flow) - predict_value))
-        return increments[0], predict_value
+        return increments[0], predict_value, record_s_matrix
 
     def cal_increments_spare(self, input_data, dp_last, target_value):
         """
@@ -139,7 +143,7 @@ class DMCModel:
         :param target_value: 控制目标值
         :return: 增量、预测值
         """
-        target_value_flow = self.target_value_flow(dp_last, target_value, 0.5)
+        target_value_flow = self.target_value_flow(dp_last, target_value, 0)
         predict_value = [dp_last for _ in range(10)]
         increments = sum(target_value_flow[:10]) - sum(predict_value)
         return increments, predict_value
