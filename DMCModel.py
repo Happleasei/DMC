@@ -74,13 +74,13 @@ class DMCModel:
             # 取U矩阵
             u_matrix_i = u_matrix[-int(cl):, pc]
             # 点积运算，并差分
-            a_u_dot = np.diff(np.dot(u_matrix_i[:, np.newaxis], a_matrix_i[np.newaxis, :]))[1:, :]
+            a_u_dot = np.diff(np.dot(u_matrix_i[:, np.newaxis], a_matrix_i[np.newaxis, :]))
             # a_u_shape = a_u_dot.shape[0]
             # 从a_u_dot右上角-左下角对角线开始对每个对角线求和，遍历会线性叠加所有特征的影响
             record_list = []
             for i in range(len(result_matrix)):
-                result_matrix[i] += np.trace(a_u_dot[i:, i:][:, ::-1])
-                record_list.append(np.trace(a_u_dot[i:, i:][:, ::-1]))
+                result_matrix[i] += np.trace(a_u_dot[:i + 1, :i + 1][:, ::-1])
+                record_list.append(np.trace(a_u_dot[:i + 1, :i + 1][:, ::-1]))
             record_s_matrix.append(record_list)
         # 通过当前的料层差压值叠加未来100步的影响，得到未来100步的预测值
         y_p = [dp_last + result_matrix[0]]
