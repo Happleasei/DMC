@@ -19,6 +19,8 @@ class DMCCtrl:
         """
         选取预测模型的输入列，拼接为一个二维数组
         输入只需要保证 最后一个是控制量即可，增加输入后对应修改step_param
+        一次风风量 炉瞬时总给煤量 是控制目标的影响量
+        冷渣机变频器转速总反馈 是实际控制的设备
         """
         dl_df = pd.DataFrame(data_list)
         input_df = pd.DataFrame([])

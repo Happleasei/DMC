@@ -14,7 +14,7 @@ class DMCModel:
 
     def __init__(self, step_param, dmc_step):
         """
-        初始化阶跃参数、特征个数、最大输入长度、预测步、控制步；
+        step_param：初始化阶跃参数、特征个数、最大输入长度、预测步、控制步；（这个需要基于历史数据寻优得到）
         初始化计算得到：各特征阶跃持续步长、阶跃a矩阵、滚动优化的dt矩阵；
         """
         self.step_param = step_param
