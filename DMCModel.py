@@ -1,8 +1,8 @@
 """
 # -*- coding: utf-8 -*-
-# Time : 2023/9/11 16:41
+# Time :2025/3/11 10:22
 # File : DMCModel.py
-# Author : Wang Hai
+# Author :
 # Code Specification : PEP8
 # Description :
 """
@@ -19,7 +19,7 @@ class DMCModel:
         """
         self.step_param = step_param
         self.params_count = int(len(self.step_param) / 3)
-        self.input_max_step = 500
+        self.input_max_step = 1000
         self.predict_step = dmc_step[0]
         self.control_step = dmc_step[1]
         self.time_lists, self.a_matrix_cut, self.a_matrix_array = self.get_matrix()
@@ -58,12 +58,13 @@ class DMCModel:
                     break
         return time_lists, a_matrix_cut, a_matrix_array
 
-    def predict_values(self, u_matrix, dp_last):
+    def predict_values(self, u_matrix, msp_last):
         """
         初始化一个结果矩阵，用于叠加所有特征输入的增量u_matrix和动态信息a_matrix矩阵点积的矩阵下三角对角线之和，并加上初始的料层值，
         得到未来预测步的料层波动
         """
         result_matrix = np.zeros(self.predict_step)
+        yp_matrix = np.zeros(self.predict_step)
         # 遍历每个特征
         record_s_matrix = []
         for pc in range(self.params_count):
@@ -74,19 +75,18 @@ class DMCModel:
             # 取U矩阵
             u_matrix_i = u_matrix[-int(cl):, pc]
             # 点积运算，并差分
-            a_u_dot = np.diff(np.dot(u_matrix_i[:, np.newaxis], a_matrix_i[np.newaxis, :]))
+            a_u_dot = np.dot(u_matrix_i[:, np.newaxis], np.diff(a_matrix_i[np.newaxis, :]))
             # a_u_shape = a_u_dot.shape[0]
             # 从a_u_dot右上角-左下角对角线开始对每个对角线求和，遍历会线性叠加所有特征的影响
             record_list = []
             for i in range(len(result_matrix)):
-                result_matrix[i] += np.trace(a_u_dot[:i + 1, :i + 1][:, ::-1])
-                record_list.append(np.trace(a_u_dot[:i + 1, :i + 1][:, ::-1]))
+                record_list.append(np.trace(a_u_dot[::-1], offset=i))
             record_s_matrix.append(record_list)
-        # 通过当前的料层差压值叠加未来100步的影响，得到未来100步的预测值
-        y_p = [dp_last + result_matrix[0]]
-        # 料层每步的预测值要累加前面所有的影响
-        for rm_ in range(len(result_matrix) - 1):
-            y_p.append(y_p[rm_] + result_matrix[rm_ + 1])
+        merger_influ = np.array(record_s_matrix).sum(axis=0)
+        yp_matrix[0] = merger_influ[0]
+        for i in range(1, self.predict_step):
+            yp_matrix[i] = yp_matrix[i - 1] + merger_influ[i]
+        y_p = [float(f"{value:.6g}") for value in yp_matrix]
         return y_p, record_s_matrix
 
     def dt_matrix(self):
@@ -107,43 +107,30 @@ class DMCModel:
                            q_matrix)
         return dt_matrix
 
-    def target_value_flow(self, dp_last, target_value, a):
+    def target_value_flow(self, msp_last, target_value, a):
         """
         平滑目标值
         """
         target_value_list = []
-        yr = dp_last
+        yr = msp_last
         for i in range(self.predict_step):
             yr = a * yr + (1 - a) * target_value
             target_value_list.append(yr)
         return target_value_list
 
-    def cal_increments(self, input_data, dp_last, target_value):
+    def cal_increments(self, input_data, msp_last, target_value):
         """
         :param input_data: 输入特征历史增量变化时序数据
-        :param dp_last: 当前计算步料层差异值
+        :param msp_last: 当前计算步料层差异值
         :param target_value: 控制目标值
         :return: 增量、预测值
         """
         # 预测
-        target_value_flow = self.target_value_flow(dp_last, target_value, 0)
-        predict_value, record_s_matrix = self.predict_values(input_data[-self.input_max_step:], dp_last)
+        target_value_flow = self.target_value_flow(msp_last, target_value, 0)
+        predict_value, record_s_matrix = self.predict_values(input_data[-self.input_max_step:], msp_last)
         # 反馈矫正
-        error = dp_last - predict_value[0]
+        error = msp_last - predict_value[0]
         predict_value += 1 * error
         # 滚动优化
         increments = np.dot(self.dt_matrix_, (np.array(target_value_flow) - predict_value))
         return increments[0], predict_value, record_s_matrix
-
-    def cal_increments_spare(self, input_data, dp_last, target_value):
-        """
-        备用方案：反馈调节，以防DMC效果不佳！
-        :param input_data: 输入特征历史增量变化时序数据
-        :param dp_last: 当前计算步料层差异值
-        :param target_value: 控制目标值
-        :return: 增量、预测值
-        """
-        target_value_flow = self.target_value_flow(dp_last, target_value, 0)
-        predict_value = [dp_last for _ in range(10)]
-        increments = sum(target_value_flow[:10]) - sum(predict_value)
-        return increments, predict_value
